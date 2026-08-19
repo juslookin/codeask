@@ -1,0 +1,50 @@
+[
+  {
+    "question": "How does Flask handle unhandled exceptions during request processing?",
+    "reference": "Flask catches unhandled exceptions in handle_exception(), broadcasts the got_request_exception signal, checks PROPAGATE_EXCEPTIONS config, logs the error, and returns a 500 Internal Server Error response."
+  },
+  {
+    "question": "When app.run() is called, what is the sequence of internal functions that execute?",
+    "reference": "Flask.run() calls get_load_dotenv() to check for .env files, cli.load_dotenv() to load environment variables, get_debug_flag() to set debug mode, cli.show_server_banner() to display startup info, and finally werkzeug.serving.run_simple() to start the WSGI server."
+  },
+  {
+    "question": "How does Flask's request context get created and pushed onto the stack?",
+    "reference": "Flask.wsgi_app creates a RequestContext via self.request_context(environ), then pushes it. AppContext.push sets the active context token, sends appcontext_pushed signal, opens the session, and matches the request URL."
+  },
+  {
+    "question": "What is the role of the Blueprint class in Flask's routing system?",
+    "reference": "Blueprint is a way to organize a group of related views and other code. It records operations to be executed when registered on an application, allowing modular application design with separate URL rules, templates, and static files."
+  },
+  {
+    "question": "How does Flask serialize JSON responses?",
+    "reference": "Flask uses DefaultJSONProvider.response() which serializes input arguments into a Response object with application/json content type. It uses app.json.dumps() for serialization with configurable indent and separators."
+  },
+  {
+    "question": "What happens during Flask's context teardown process?",
+    "reference": "AppContext.pop() handles context teardown by triggering teardown_request handlers, then teardown_appcontext handlers, closing the request, resetting context variables, and raising any collected teardown errors."
+  },
+  {
+    "question": "How does Flask's test client preserve request context?",
+    "reference": "The test client can preserve context across requests using the with statement. When context preservation is enabled, the request context is kept alive after the response, allowing inspection of g, session, and other context-local objects."
+  },
+  {
+    "question": "What is the _AppCtxGlobals class and how does it work?",
+    "reference": "_AppCtxGlobals provides a namespace for storing data during an application context. It supports dictionary-like get() and pop() methods, and is accessed via the g proxy. It is created fresh for each request context."
+  },
+  {
+    "question": "How does Flask's full_dispatch_request handle the request lifecycle?",
+    "reference": "full_dispatch_request runs before_request handlers first. If none return a response, it dispatches the request to the matched view function. It then runs after_request handlers on the response. Any exceptions are caught and passed to handle_user_exception."
+  },
+  {
+    "question": "What WSGI middleware does Flask use internally?",
+    "reference": "Flask uses werkzeug's DispatcherMiddleware and ProxyFix. The wsgi_app method itself acts as a WSGI application, wrapping the request handling in proper context management."
+  },
+  {
+    "question": "How does Flask's configuration system work?",
+    "reference": "Flask uses a Config class that inherits from dict. Configuration can be loaded from Python files, environment variables, JSON files, TOML files, or mapping objects. Default configuration values are set during app initialization."
+  },
+  {
+    "question": "How does Flask handle URL routing and rule matching?",
+    "reference": "Flask delegates URL routing to werkzeug's Map and Rule classes. Routes are registered via @app.route() decorator which calls add_url_rule(). URL matching happens during context push via url_adapter.match()."
+  }
+]
