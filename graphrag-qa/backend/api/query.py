@@ -7,6 +7,8 @@ import asyncio
 import chromadb
 from llm.gemini import stream_answer
 from llm.agent import agent_app
+from retrieval.vector_search import vector_search
+from retrieval.graph_traversal import expand_one_hop
 from retrieval.context_builder import build_context
 
 logger = logging.getLogger(__name__)
@@ -16,44 +18,66 @@ router = APIRouter()
 class QueryRequest(BaseModel):
     question: str
     collection_name: str
+    # "graph": plain vector search + one-hop AST traversal (no extra LLM calls).
+    # "agent": LangGraph planner/critic loop (more LLM calls, more latency).
+    # Our own eval (see eval/benchmark.py, README) found "graph" beats "agent"
+    # on both context_precision and faithfulness, so it's the default.
+    mode: str = "graph"
 
-def get_context_and_graph(question: str, collection: str):
-    initial_state = {
-        "question": question,
-        "collection_name": collection,
-        "context_chunks": [],
-        "search_history": [],
-        "iterations": 0
-    }
-    final_state = agent_app.invoke(initial_state)
-    chunks = final_state.get("context_chunks", [])
-    
-    # Build graph payload
-    nodes = []
-    edges = []
+def _build_graph_payload(chunks: list[dict]) -> dict:
+    """Build the {nodes, edges} payload the frontend's GraphVisualizer expects.
+
+    Chunk dicts (from vector_search / graph_traversal) carry `id`,
+    `qualified_name`, `file_path` and `callees` (a list of *qualified names*,
+    not ids). Edges have to be reconstructed by resolving each chunk's
+    callees against the qualified_name -> id map of the chunks we actually
+    retrieved — there is no separate "edges" field on a chunk.
+    """
+    nodes, edges = [], []
     existing_nodes = set()
+    qname_to_ids: dict[str, list[str]] = {}
+    for c in chunks:
+        qname_to_ids.setdefault(c["qualified_name"], []).append(c["id"])
+
     for c in chunks:
         node_id = c["id"]
         if node_id not in existing_nodes:
-            nodes.append({"id": node_id, "label": c.get("filename", node_id), "is_active": True})
+            nodes.append({"id": node_id, "label": c.get("qualified_name", node_id), "is_active": True})
             existing_nodes.add(node_id)
-            
-        for e in c.get("edges", []):
-            edges.append({"source": e["source"], "target": e["target"]})
-            if e["source"] not in existing_nodes:
-                nodes.append({"id": e["source"], "label": e["source"].split(":")[-1], "is_active": False})
-                existing_nodes.add(e["source"])
-            if e["target"] not in existing_nodes:
-                nodes.append({"id": e["target"], "label": e["target"].split(":")[-1], "is_active": False})
-                existing_nodes.add(e["target"])
 
+        for callee_qname in c.get("callees", []):
+            for target_id in qname_to_ids.get(callee_qname, []):
+                if target_id != node_id:
+                    edges.append({"source": node_id, "target": target_id})
+
+    return {"nodes": nodes, "edges": edges}
+
+def get_context_and_graph(question: str, collection: str, mode: str = "graph"):
+    if mode == "agent":
+        initial_state = {
+            "question": question,
+            "collection_name": collection,
+            "context_chunks": [],
+            "search_history": [],
+            "iterations": 0
+        }
+        final_state = agent_app.invoke(initial_state)
+        chunks = final_state.get("context_chunks", [])
+    else:
+        seed = vector_search(question, collection)
+        expanded = expand_one_hop(seed, collection)
+        chunks = seed + expanded
+
+    graph_data = _build_graph_payload(chunks)
     context = build_context(chunks, [])
-    return context, {"nodes": nodes, "edges": edges}
+    return context, graph_data
 
 @router.post("/query")
 async def query(req: QueryRequest):
     try:
-        context, graph_data = await asyncio.to_thread(get_context_and_graph, req.question, req.collection_name)
+        context, graph_data = await asyncio.to_thread(
+            get_context_and_graph, req.question, req.collection_name, req.mode
+        )
     except chromadb.errors.NotFoundError:
         raise HTTPException(
             status_code=404,
