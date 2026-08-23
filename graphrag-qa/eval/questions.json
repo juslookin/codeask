@@ -38,13 +38,5 @@
   {
     "question": "What WSGI middleware does Flask use internally?",
     "reference": "Flask uses werkzeug's DispatcherMiddleware and ProxyFix. The wsgi_app method itself acts as a WSGI application, wrapping the request handling in proper context management."
-  },
-  {
-    "question": "How does Flask's configuration system work?",
-    "reference": "Flask uses a Config class that inherits from dict. Configuration can be loaded from Python files, environment variables, JSON files, TOML files, or mapping objects. Default configuration values are set during app initialization."
-  },
-  {
-    "question": "How does Flask handle URL routing and rule matching?",
-    "reference": "Flask delegates URL routing to werkzeug's Map and Rule classes. Routes are registered via @app.route() decorator which calls add_url_rule(). URL matching happens during context push via url_adapter.match()."
   }
 ]

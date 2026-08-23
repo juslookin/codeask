@@ -3,7 +3,7 @@ from typing import TypedDict, Literal
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
-from llm.gemini import model
+from llm.gemini import model, stream_answer
 from retrieval.vector_search import vector_search
 from retrieval.graph_traversal import expand_one_hop
 from retrieval.context_builder import build_context
@@ -123,3 +123,24 @@ def run_agentic_retrieval(question: str, collection_name: str) -> str:
     
     # Build the final massive context string
     return build_context(final_state["context_chunks"], [])
+
+def run_agent_with_chunks(question: str, collection_name: str) -> tuple[str, list[dict]]:
+    """Run the agentic retrieval and return both the answer and raw chunks.
+    
+    Used by the benchmark to evaluate context_precision on individual chunks
+    instead of a single concatenated string.
+    """
+    initial_state = {
+        "question": question,
+        "collection_name": collection_name,
+        "context_chunks": [],
+        "search_history": [],
+        "iterations": 0
+    }
+    
+    final_state = agent_app.invoke(initial_state)
+    chunks = final_state["context_chunks"]
+    context = build_context(chunks, [])
+    answer = "".join(stream_answer(question, context))
+    return answer, chunks
+

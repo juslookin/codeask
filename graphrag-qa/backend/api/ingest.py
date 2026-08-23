@@ -13,10 +13,11 @@ router = APIRouter()
 class IngestRequest(BaseModel):
     github_url: str
 
-def blocking_ingest(github_url: str):
+def blocking_ingest(github_url: str) -> dict:
     res = clone_repo(github_url)
     if res["error"]:
-        raise HTTPException(status_code=400, detail=res["error"])
+        # Return error as plain dict — HTTPException cannot cross thread boundaries
+        return {"success": False, "error": res["error"]}
 
     try:
         chunks = parse_repo(res["files"], res["repo_path"])
@@ -28,4 +29,7 @@ def blocking_ingest(github_url: str):
 
 @router.post("/ingest")
 async def ingest(req: IngestRequest):
-    return await asyncio.to_thread(blocking_ingest, req.github_url)
+    result = await asyncio.to_thread(blocking_ingest, req.github_url)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result

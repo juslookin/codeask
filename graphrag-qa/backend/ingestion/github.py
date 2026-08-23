@@ -58,7 +58,8 @@ def clone_repo(github_url: str) -> dict:
     for root, dirs, files in os.walk(tmp_dir):
         dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
         for f in files:
-            if os.path.splitext(f)[1].lower() == '.py':
+            ext = os.path.splitext(f)[1].lower()
+            if ext not in IGNORE_EXTENSIONS:
                 accepted.append(os.path.join(root, f))
                 if len(accepted) >= MAX_FILES:
                     break

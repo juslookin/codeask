@@ -1,10 +1,12 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 import os
+from dotenv import load_dotenv
 
+load_dotenv()
 
 model = ChatGoogleGenerativeAI(
-    model="gemini-3.6-flash",
+    model="gemini-3.5-flash-lite",   # 500 RPD / 15 RPM — highest free-tier quota
     temperature=0.3,
     google_api_key=os.getenv("GEMINI_API_KEY")
 )

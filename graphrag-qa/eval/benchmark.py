@@ -12,15 +12,41 @@ from retrieval.vector_search import vector_search
 from retrieval.graph_traversal import expand_one_hop
 from retrieval.context_builder import build_context
 from llm.gemini import stream_answer
+from llm.agent import run_agent_with_chunks
 from datasets import Dataset
 from ragas import evaluate
 from ragas.metrics import context_precision, answer_relevancy
 from ragas.llms import LangchainLLMWrapper
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from ragas.embeddings import LangchainEmbeddingsWrapper
+from ragas.run_config import RunConfig
 import pandas as pd
 
-evaluator_llm = LangchainLLMWrapper(ChatGoogleGenerativeAI(model="gemini-3.6-flash", temperature=0))
+# Monkey-patch to enforce global 4.2s rate limit (14 RPM max) across Agentic RAG & Ragas
+from langchain_google_genai import ChatGoogleGenerativeAI
+_orig_gen = ChatGoogleGenerativeAI._generate
+_orig_agen = ChatGoogleGenerativeAI._agenerate
+def _rl_gen(*args, **kwargs):
+    import time
+    time.sleep(4.2)
+    return _orig_gen(*args, **kwargs)
+async def _rl_agen(*args, **kwargs):
+    import asyncio
+    await asyncio.sleep(4.2)
+    return await _orig_agen(*args, **kwargs)
+ChatGoogleGenerativeAI._generate = _rl_gen
+ChatGoogleGenerativeAI._agenerate = _rl_agen
+import time
+
+evaluator_llm = LangchainLLMWrapper(
+    ChatGoogleGenerativeAI(
+        model="gemini-3.5-flash-lite",   # 500 RPD / 15 RPM — needed for full 50-q benchmark
+        temperature=0,
+        google_api_key=os.getenv("GEMINI_API_KEY")
+    )
+)
 COLLECTION_NAME = "pallets_flask"
+evaluator_embeddings = LangchainEmbeddingsWrapper(GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=os.getenv("GEMINI_API_KEY")))
 
 def safe_stream(question: str, context: str):
     # Wrapped with exponential backoff
@@ -31,25 +57,26 @@ def safe_stream(question: str, context: str):
             if attempt == 2: raise e
             time.sleep(2 ** attempt)
 
+def run_naive_rag(question: str) -> dict:
+    chunks = vector_search(question, COLLECTION_NAME)
+    context = build_context(chunks, [])
+    return {"answer": safe_stream(question, context), "contexts": [c["source_code"] for c in chunks]}
+
 def run_graphrag(question: str) -> dict:
     seed = vector_search(question, COLLECTION_NAME)
     expanded = expand_one_hop(seed, COLLECTION_NAME)
     context = build_context(seed, expanded)
     return {"answer": safe_stream(question, context), "contexts": [c["source_code"] for c in seed + expanded]}
 
-def run_naive_rag(question: str) -> dict:
-    chunks = vector_search(question, COLLECTION_NAME)
-    context = build_context(chunks, [])
-    return {"answer": safe_stream(question, context), "contexts": [c["source_code"] for c in chunks]}
-
 def run_agentic_rag(question: str) -> dict:
-    """Run the full multi-agent LangGraph retrieval pipeline."""
+    """Run the full multi-agent LangGraph retrieval pipeline.
+    
+    Uses run_agent_with_chunks to get individual chunks for proper
+    context_precision scoring (not a single concatenated string).
+    """
     try:
-        from llm.agent import run_agentic_retrieval
-        context = run_agentic_retrieval(question, COLLECTION_NAME)
-        answer = safe_stream(question, context)
-        # We don't have the raw chunk list from the agent, so use the context string
-        return {"answer": answer, "contexts": [context]}
+        answer, chunks = run_agent_with_chunks(question, COLLECTION_NAME)
+        return {"answer": answer, "contexts": [c["source_code"] for c in chunks]}
     except Exception as e:
         print(f"Agentic RAG error: {e}")
         return {"answer": f"Error: {e}", "contexts": [""]}
@@ -63,25 +90,29 @@ def build_dataset(questions: list[dict], pipeline_fn) -> Dataset:
         rows["response"].append(result["answer"])
         rows["retrieved_contexts"].append(result["contexts"])
         rows["reference"].append(q["reference"])
+        time.sleep(5) # Rate limit protection (12 RPM)
     return Dataset.from_dict(rows)
 
 if __name__ == "__main__":
     with open(os.path.join(SCRIPT_DIR, "questions.json")) as f:
         questions = json.load(f)
 
-    metrics = [context_precision, answer_relevancy]
+    from ragas.metrics import faithfulness
+    metrics = [context_precision, faithfulness]
 
+    run_config = RunConfig(max_workers=1, max_retries=2, max_wait=60)
+    
     print("\nEvaluating Naive RAG...")
     naive_ds = build_dataset(questions, run_naive_rag)
-    naive_scores = evaluate(naive_ds, metrics=metrics, llm=evaluator_llm)
+    naive_scores = evaluate(naive_ds, metrics=metrics, llm=evaluator_llm, embeddings=evaluator_embeddings, run_config=run_config)
 
     print("\nEvaluating GraphRAG...")
     graph_ds = build_dataset(questions, run_graphrag)
-    graph_scores = evaluate(graph_ds, metrics=metrics, llm=evaluator_llm)
+    graph_scores = evaluate(graph_ds, metrics=metrics, llm=evaluator_llm, embeddings=evaluator_embeddings, run_config=run_config)
 
     print("\nEvaluating Agentic RAG...")
     agentic_ds = build_dataset(questions, run_agentic_rag)
-    agentic_scores = evaluate(agentic_ds, metrics=metrics, llm=evaluator_llm)
+    agentic_scores = evaluate(agentic_ds, metrics=metrics, llm=evaluator_llm, embeddings=evaluator_embeddings, run_config=run_config)
 
     print("\n" + "=" * 80)
     print(f"{'Metric':<28} {'Naive RAG':>12} {'GraphRAG':>12} {'Agentic':>12} {'Best Delta':>12}")
@@ -91,7 +122,7 @@ if __name__ == "__main__":
     graph_df = graph_scores.to_pandas()
     agentic_df = agentic_scores.to_pandas()
 
-    for metric in ["context_precision", "answer_relevancy"]:
+    for metric in ["context_precision", "faithfulness"]:
         n_val = naive_df[metric].mean()
         g_val = graph_df[metric].mean()
         a_val = agentic_df[metric].mean()
