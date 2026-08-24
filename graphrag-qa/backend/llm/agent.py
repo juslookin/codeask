@@ -3,7 +3,7 @@ from typing import TypedDict, Literal
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
-from llm.gemini import model, stream_answer
+from llm.gemini import structured_model, safe_stream_answer
 from retrieval.vector_search import vector_search
 from retrieval.graph_traversal import expand_one_hop
 from retrieval.context_builder import build_context
@@ -24,8 +24,8 @@ class SearchQuery(BaseModel):
 class CriticDecision(BaseModel):
     is_sufficient: bool = Field(description="True if the context is sufficient to answer the question completely")
 
-planner_model = model.with_structured_output(SearchQuery)
-critic_model = model.with_structured_output(CriticDecision)
+planner_model = structured_model.with_structured_output(SearchQuery)
+critic_model = structured_model.with_structured_output(CriticDecision)
 
 def planner_node(state: AgentState):
     history = state.get("search_history", [])
@@ -141,6 +141,5 @@ def run_agent_with_chunks(question: str, collection_name: str) -> tuple[str, lis
     final_state = agent_app.invoke(initial_state)
     chunks = final_state["context_chunks"]
     context = build_context(chunks, [])
-    answer = "".join(stream_answer(question, context))
+    answer = safe_stream_answer(question, context)
     return answer, chunks
-

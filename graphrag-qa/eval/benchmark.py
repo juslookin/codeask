@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", "backend"))
 from retrieval.vector_search import vector_search
 from retrieval.graph_traversal import expand_one_hop
 from retrieval.context_builder import build_context
-from llm.gemini import stream_answer
+from llm.gemini import safe_stream_answer
 from llm.agent import run_agent_with_chunks
 from datasets import Dataset
 from ragas import evaluate
@@ -22,51 +22,33 @@ from ragas.embeddings import LangchainEmbeddingsWrapper
 from ragas.run_config import RunConfig
 import pandas as pd
 
-# Monkey-patch to enforce global 4.2s rate limit (14 RPM max) across Agentic RAG & Ragas
-from langchain_google_genai import ChatGoogleGenerativeAI
-_orig_gen = ChatGoogleGenerativeAI._generate
-_orig_agen = ChatGoogleGenerativeAI._agenerate
-def _rl_gen(*args, **kwargs):
-    import time
-    time.sleep(4.2)
-    return _orig_gen(*args, **kwargs)
-async def _rl_agen(*args, **kwargs):
-    import asyncio
-    await asyncio.sleep(4.2)
-    return await _orig_agen(*args, **kwargs)
-ChatGoogleGenerativeAI._generate = _rl_gen
-ChatGoogleGenerativeAI._agenerate = _rl_agen
-import time
+# Delay between benchmark rows (build_dataset), on top of Ragas's own max_retries/
+# max_wait backoff. Tune via env var: raise it if you're still on the Gemini free
+# tier (15 RPM / 500 RPD for gemini-3.5-flash-lite); once billing is enabled
+# (Tier 1) this can safely drop toward 0. See graphrag-qa/README.md.
+EVAL_ROW_DELAY = float(os.getenv("EVAL_RATE_LIMIT_DELAY", "4.0"))
 
 evaluator_llm = LangchainLLMWrapper(
     ChatGoogleGenerativeAI(
-        model="gemini-3.5-flash-lite",   # 500 RPD / 15 RPM — needed for full 50-q benchmark
+        model="gemini-3.5-flash-lite",
         temperature=0,
         google_api_key=os.getenv("GEMINI_API_KEY")
     )
 )
 COLLECTION_NAME = "pallets_flask"
-evaluator_embeddings = LangchainEmbeddingsWrapper(GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=os.getenv("GEMINI_API_KEY")))
-
-def safe_stream(question: str, context: str):
-    # Wrapped with exponential backoff
-    for attempt in range(3):
-        try:
-            return "".join(stream_answer(question, context))
-        except Exception as e:
-            if attempt == 2: raise e
-            time.sleep(2 ** attempt)
+# NOTE: "models/embedding-001" is deprecated/retired — use gemini-embedding-001.
+evaluator_embeddings = LangchainEmbeddingsWrapper(GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=os.getenv("GEMINI_API_KEY")))
 
 def run_naive_rag(question: str) -> dict:
     chunks = vector_search(question, COLLECTION_NAME)
     context = build_context(chunks, [])
-    return {"answer": safe_stream(question, context), "contexts": [c["source_code"] for c in chunks]}
+    return {"answer": safe_stream_answer(question, context), "contexts": [c["source_code"] for c in chunks]}
 
 def run_graphrag(question: str) -> dict:
     seed = vector_search(question, COLLECTION_NAME)
     expanded = expand_one_hop(seed, COLLECTION_NAME)
     context = build_context(seed, expanded)
-    return {"answer": safe_stream(question, context), "contexts": [c["source_code"] for c in seed + expanded]}
+    return {"answer": safe_stream_answer(question, context), "contexts": [c["source_code"] for c in seed + expanded]}
 
 def run_agentic_rag(question: str) -> dict:
     """Run the full multi-agent LangGraph retrieval pipeline.
@@ -81,16 +63,48 @@ def run_agentic_rag(question: str) -> dict:
         print(f"Agentic RAG error: {e}")
         return {"answer": f"Error: {e}", "contexts": [""]}
 
-def build_dataset(questions: list[dict], pipeline_fn) -> Dataset:
+def build_dataset(questions: list[dict], pipeline_fn, name: str) -> Dataset:
+    checkpoint_file = os.path.join(SCRIPT_DIR, f"checkpoint_{name}.json")
     rows = {"user_input": [], "response": [], "retrieved_contexts": [], "reference": []}
-    for i, q in enumerate(questions):
+    
+    if os.path.exists(checkpoint_file):
+        try:
+            with open(checkpoint_file, "r") as f:
+                rows = json.load(f)
+        except Exception:
+            pass # fallback to empty if corrupted
+            
+    start_idx = len(rows.get("user_input", []))
+    if start_idx >= len(questions):
+        print(f"  [+] Loaded completed dataset '{name}' from checkpoint.")
+        return Dataset.from_dict(rows)
+        
+    for i in range(start_idx, len(questions)):
+        q = questions[i]
         print(f"  [{i+1}/{len(questions)}] {q['question'][:70]}...")
-        result = pipeline_fn(q["question"])
+        
+        # Robust retry loop in case internet drops during generation
+        for attempt in range(5):
+            try:
+                result = pipeline_fn(q["question"])
+                break
+            except Exception as e:
+                print(f"    Network Error: {e}. Retrying in 10s...")
+                time.sleep(10)
+        else:
+            result = pipeline_fn(q["question"]) # final attempt, will crash if fails
+            
         rows["user_input"].append(q["question"])
         rows["response"].append(result["answer"])
         rows["retrieved_contexts"].append(result["contexts"])
         rows["reference"].append(q["reference"])
-        time.sleep(5) # Rate limit protection (12 RPM)
+        
+        # Save progress row-by-row
+        with open(checkpoint_file, "w") as f:
+            json.dump(rows, f, indent=2)
+            
+        time.sleep(EVAL_ROW_DELAY)
+        
     return Dataset.from_dict(rows)
 
 if __name__ == "__main__":
@@ -103,18 +117,19 @@ if __name__ == "__main__":
     # the answer doesn't contradict retrieved context, not that it's right.
     metrics = [context_precision, faithfulness, answer_correctness]
 
-    run_config = RunConfig(max_workers=1, max_retries=2, max_wait=60)
+    # max_retries increased to 10 to survive Gemini's 15 RPM free tier limit
+    run_config = RunConfig(max_workers=1, max_retries=10, max_wait=120)
     
     print("\nEvaluating Naive RAG...")
-    naive_ds = build_dataset(questions, run_naive_rag)
+    naive_ds = build_dataset(questions, run_naive_rag, "naive")
     naive_scores = evaluate(naive_ds, metrics=metrics, llm=evaluator_llm, embeddings=evaluator_embeddings, run_config=run_config)
 
     print("\nEvaluating GraphRAG...")
-    graph_ds = build_dataset(questions, run_graphrag)
+    graph_ds = build_dataset(questions, run_graphrag, "graph")
     graph_scores = evaluate(graph_ds, metrics=metrics, llm=evaluator_llm, embeddings=evaluator_embeddings, run_config=run_config)
 
     print("\nEvaluating Agentic RAG...")
-    agentic_ds = build_dataset(questions, run_agentic_rag)
+    agentic_ds = build_dataset(questions, run_agentic_rag, "agentic")
     agentic_scores = evaluate(agentic_ds, metrics=metrics, llm=evaluator_llm, embeddings=evaluator_embeddings, run_config=run_config)
 
     print("\n" + "=" * 80)

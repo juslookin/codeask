@@ -21,7 +21,7 @@ CodeAsk solves these problems by treating code as data structures rather than st
 
 ### 1. Ingestion Pipeline (AST & Graph DB)
 * **Multi-Language AST Chunking:** Uses `tree-sitter` to parse Python, JavaScript, TypeScript, JSX, and TSX repositories. It intelligently extracts exact `function_definition` and `class_declaration` blocks, preserving absolute structural boundaries.
-* **Deterministic Graph Engine:** Scans the AST for `call_expression` nodes to build a bidirectional dependency graph (e.g., mapping exactly which functions call `db.commit()`).
+* **Deterministic Graph Engine:** Scans the AST for `call_expression` nodes to build a directed call graph — each function is mapped to the functions *it calls* (e.g., exactly which functions call `db.commit()`). One-hop expansion currently walks this graph forward (callee direction) only; a reverse caller index is a natural next step.
 * **Vector Storage:** Embeds these semantic chunks into a **ChromaDB** vector database with rich metadata (filepaths, start/end lines, parent classes).
 
 ### 2. Retrieval Pipeline
