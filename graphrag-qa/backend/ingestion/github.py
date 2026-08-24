@@ -5,6 +5,8 @@ import git
 import re
 import stat
 
+from ingestion.ast_parser import PARSERS
+
 def remove_readonly(func, path, excinfo):
     os.chmod(path, stat.S_IWRITE)
     func(path)
@@ -13,10 +15,12 @@ IGNORE_DIRS = {
     "node_modules", "__pycache__", ".git", "venv", "env",
     "dist", "build", ".next", "vendor", "target", ".venv"
 }
-IGNORE_EXTENSIONS = {
-    ".png", ".jpg", ".jpeg", ".pdf", ".zip", ".exe", ".bin", ".whl",
-    ".pyc", ".so", ".dll", ".mp3", ".mp4", ".db", ".sqlite"
-}
+# Allowlist, not a denylist: only accept extensions the AST parser actually
+# supports. Previously this was a denylist (IGNORE_EXTENSIONS) covering only
+# binary junk, so .md/.json/.yml/.css/lockfiles/etc. still ate into the
+# MAX_FILES cap even though ast_parser.py silently produces zero chunks for
+# them — wasted budget on files that could never contribute context.
+ALLOWED_EXTENSIONS = set(PARSERS.keys())
 MAX_FILES = 500
 MAX_SIZE_MB = 50
 
@@ -59,7 +63,7 @@ def clone_repo(github_url: str) -> dict:
         dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
         for f in files:
             ext = os.path.splitext(f)[1].lower()
-            if ext not in IGNORE_EXTENSIONS:
+            if ext in ALLOWED_EXTENSIONS:
                 accepted.append(os.path.join(root, f))
                 if len(accepted) >= MAX_FILES:
                     break

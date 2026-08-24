@@ -17,6 +17,37 @@ PARSERS = {
     ".tsx": Parser(TSX_LANGUAGE),
 }
 
+# If a bare name (e.g. `obj.save()` or a free function `parse()`) matches
+# more than this many distinct classes/modules, we have no receiver-type or
+# import info to disambiguate it — treat it as ambiguous and drop the edge
+# rather than fanning out to every candidate. This is a cheap stopgap for
+# the lack of real scope/type resolution (see roadmap Tier 3 item #18).
+MAX_FANOUT_CANDIDATES = 3
+
+
+def _resolve_bare_name(
+    raw_name: str,
+    raw_to_base: dict[str, list[str]],
+    base_to_qualified: dict[str, list[str]],
+    exclude_qname: str,
+) -> list[str]:
+    """Resolve an unqualified call name to callee qualified names.
+
+    Returns an empty list (no edge) if the name resolves to more than
+    MAX_FANOUT_CANDIDATES distinct base names, since at that point the
+    edge is more noise than signal.
+    """
+    bases = raw_to_base.get(raw_name, [])
+    if len(bases) > MAX_FANOUT_CANDIDATES:
+        return []
+    resolved = []
+    for base in bases:
+        for qname in base_to_qualified.get(base, []):
+            if qname != exclude_qname:
+                resolved.append(qname)
+    return resolved
+
+
 def build_graph(chunks: list[dict]) -> dict[str, list[str]]:
     raw_to_base: dict[str, list[str]] = {}
     base_to_qualified: dict[str, list[str]] = {}
@@ -64,15 +95,17 @@ def build_graph(chunks: list[dict]) -> dict[str, list[str]]:
                                 find_calls(child)
                             return
 
-                        for base in raw_to_base.get(raw_method, []):
-                            for qname in base_to_qualified.get(base, []):
-                                if qname != chunk["qualified_name"]:
-                                    callees.append(qname)
+                        callees.extend(
+                            _resolve_bare_name(
+                                raw_method, raw_to_base, base_to_qualified, chunk["qualified_name"]
+                            )
+                        )
                     else:
-                        for base in raw_to_base.get(call_text, []):
-                            for qname in base_to_qualified.get(base, []):
-                                if qname != chunk["qualified_name"]:
-                                    callees.append(qname)
+                        callees.extend(
+                            _resolve_bare_name(
+                                call_text, raw_to_base, base_to_qualified, chunk["qualified_name"]
+                            )
+                        )
 
             for child in node.children:
                 find_calls(child)

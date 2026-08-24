@@ -1,3 +1,11 @@
+> **⚠️ Historical planning document — not current.** This was written early in development
+> and describes an older version of the app (Python-only ingestion, an earlier Gemini model,
+> and no `FileExplorer`/`GraphVisualizer`/`ErrorBoundary` components). It's kept for reference
+> only. For accurate, current documentation see the [root README](../README.md) and
+> [`graphrag-qa/README.md`](../graphrag-qa/README.md).
+
+---
+
 # GraphRAG Codebase Q&A — Integrated Build Plan (v5)
 
 This plan reflects the **actual current implementation** as of August 2026. It supersedes v4, which documented a one-generation-older retrieval architecture and contained several bugs that caused hard failures on a fresh install.

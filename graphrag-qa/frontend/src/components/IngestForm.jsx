@@ -96,7 +96,7 @@ export default function IngestForm({ onIngested }) {
             )}
 
             <p className="mt-4 text-xs text-gray-600">
-                Public repos only · Python files · max 500 files / 50 MB
+                Public repos only · Python, JS, TS, JSX, TSX · max 500 files / 50 MB
             </p>
         </div>
     )

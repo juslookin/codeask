@@ -15,7 +15,7 @@ from llm.gemini import stream_answer
 from llm.agent import run_agent_with_chunks
 from datasets import Dataset
 from ragas import evaluate
-from ragas.metrics import context_precision, answer_relevancy
+from ragas.metrics import context_precision, answer_relevancy, answer_correctness
 from ragas.llms import LangchainLLMWrapper
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from ragas.embeddings import LangchainEmbeddingsWrapper
@@ -98,7 +98,10 @@ if __name__ == "__main__":
         questions = json.load(f)
 
     from ragas.metrics import faithfulness
-    metrics = [context_precision, faithfulness]
+    # answer_correctness scores the answer against `reference` (factual
+    # correctness + semantic similarity) — faithfulness alone only checks
+    # the answer doesn't contradict retrieved context, not that it's right.
+    metrics = [context_precision, faithfulness, answer_correctness]
 
     run_config = RunConfig(max_workers=1, max_retries=2, max_wait=60)
     
@@ -122,7 +125,7 @@ if __name__ == "__main__":
     graph_df = graph_scores.to_pandas()
     agentic_df = agentic_scores.to_pandas()
 
-    for metric in ["context_precision", "faithfulness"]:
+    for metric in ["context_precision", "faithfulness", "answer_correctness"]:
         n_val = naive_df[metric].mean()
         g_val = graph_df[metric].mean()
         a_val = agentic_df[metric].mean()

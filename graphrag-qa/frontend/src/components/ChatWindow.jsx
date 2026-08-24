@@ -24,6 +24,7 @@ export default function ChatWindow({ collectionName, onGraphUpdate }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState("")
   const [streaming, setStreaming] = useState(false)
+  const [mode, setMode] = useState("graph") // "graph" (fast) or "agent" (thorough)
   const bottomRef = useRef(null)
 
   useEffect(() => {
@@ -42,7 +43,7 @@ export default function ChatWindow({ collectionName, onGraphUpdate }) {
       const res = await fetch(`${API}/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, collection_name: collectionName }),
+        body: JSON.stringify({ question, collection_name: collectionName, mode }),
       })
 
       if (!res.ok) throw new Error(`Backend error ${res.status}`)
@@ -120,6 +121,33 @@ export default function ChatWindow({ collectionName, onGraphUpdate }) {
           </div>
         ))}
         <div ref={bottomRef} />
+      </div>
+
+      <div className="flex gap-2 mb-2 text-xs">
+        <button
+          type="button"
+          onClick={() => setMode("graph")}
+          disabled={streaming}
+          title="Vector search + one-hop graph traversal — no extra LLM calls"
+          className={`px-3 py-1 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${mode === "graph"
+              ? "bg-blue-600 text-white"
+              : "bg-gray-800 text-gray-400 hover:text-white"
+            }`}
+        >
+          Fast (graph)
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("agent")}
+          disabled={streaming}
+          title="LangGraph planner/critic loop — more LLM calls, more latency"
+          className={`px-3 py-1 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${mode === "agent"
+              ? "bg-blue-600 text-white"
+              : "bg-gray-800 text-gray-400 hover:text-white"
+            }`}
+        >
+          Thorough (agent)
+        </button>
       </div>
 
       <div className="flex gap-2">
