@@ -5,11 +5,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import asyncio
 import chromadb
-from llm.gemini import stream_answer
+from llm.deepseek import stream_answer
 from llm.agent import agent_app
 from retrieval.vector_search import vector_search
 from retrieval.graph_traversal import expand_one_hop
 from retrieval.context_builder import build_context
+from retrieval.selector import select_top_k
 
 logger = logging.getLogger(__name__)
 
@@ -59,14 +60,17 @@ def get_context_and_graph(question: str, collection: str, mode: str = "graph"):
             "collection_name": collection,
             "context_chunks": [],
             "search_history": [],
-            "iterations": 0
+            "iterations": 0,
+            "next_action": "retrieve"
         }
         final_state = agent_app.invoke(initial_state)
         chunks = final_state.get("context_chunks", [])
     else:
-        seed = vector_search(question, collection)
+        seed, query_emb = vector_search(question, collection)
         expanded = expand_one_hop(seed, collection)
-        chunks = seed + expanded
+        chunks = select_top_k(question, seed, expanded,
+                              query_embedding=query_emb,
+                              collection_name=collection)
 
     graph_data = _build_graph_payload(chunks)
     context = build_context(chunks, [])
@@ -90,14 +94,27 @@ async def query(req: QueryRequest):
     def event_stream():
         # First yield the graph data
         yield f"__GRAPH_START__\n{json.dumps(graph_data)}\n__GRAPH_END__\n"
-        # Then stream the answer
-        for chunk in stream_answer(req.question, context):
-            yield chunk
+        # Then stream the answer — wrapped in try/except so a mid-stream
+        # DeepSeek failure yields a visible error instead of an abrupt cutoff.
+        try:
+            for chunk in stream_answer(req.question, context):
+                yield chunk
+        except Exception as e:
+            logger.exception(f"LLM stream error: {e}")
+            yield f"\n\n⚠️ **Error generating answer:** {e}"
 
     return StreamingResponse(event_stream(), media_type="text/plain")
 
+# ── File tree cache ──────────────────────────────────────────────────────
+# The file tree is static after ingestion, so we cache it per collection
+# to avoid fetching all metadata from ChromaDB on every request.
+_file_tree_cache: dict[str, list] = {}
+
 @router.get('/api/files')
 async def get_files(collection: str):
+    if collection in _file_tree_cache:
+        return {'files': _file_tree_cache[collection]}
+
     try:
         from ingestion.embedder import chroma_client
         col = chroma_client.get_collection(collection)
@@ -122,7 +139,8 @@ async def get_files(collection: str):
         for path in sorted(paths):
             parts = path.replace('\\', '/').split('/')
             insert_node(file_tree, parts)
-            
+
+        _file_tree_cache[collection] = file_tree
         return {'files': file_tree}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

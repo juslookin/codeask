@@ -4,11 +4,20 @@ import CitationTag from "./CitationTag"
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000"
 
+// Helper to safely extract text from React children, handling nested arrays/objects
+const extractText = (children) => {
+  if (typeof children === 'string' || typeof children === 'number') return String(children);
+  if (Array.isArray(children)) return children.map(extractText).join('');
+  if (children?.props?.children) return extractText(children.props.children);
+  return '';
+}
+
 // Intercept inline code blocks that look like citations (filepath:start-end)
 // and render them as clickable tags instead of <code> elements.
 const renderers = {
   code({ node, className, children, ...props }) {
-    const match = /[\w/.-]+:\d+-\d+/.exec(String(children).trim())
+    const text = extractText(children).trim();
+    const match = /[\w/.-]+:\d+-\d+/.exec(text);
     if (!className && match) {
       return <CitationTag citation={match[0]} />
     }

@@ -37,7 +37,8 @@ CodeAsk solves these problems by treating code as data structures rather than st
 * **Tree-sitter:** High-performance, language-agnostic AST parsing.
 * **ChromaDB:** Local vector database for extremely fast semantic similarity search.
 * **FastAPI:** High-throughput asynchronous REST API for the frontend and streaming text generation.
-* **Google Gemini 3.5 Flash-Lite:** LLM reasoning model, via `langchain-google-genai`.
+* **DeepSeek-V3 (deepseek-chat):** LLM reasoning model, via `langchain-openai`.
+* **Gemini Embedding 2 (gemini-embedding-exp-03-07):** Embeddings model.
 
 **Frontend UI**
 * **React 18 & Vite:** Lightning-fast frontend build tooling.
@@ -67,7 +68,7 @@ venv\Scripts\activate
 cd backend
 python -m uvicorn main:app --reload
 ```
-*(Requires a `.env` file in the `backend/` directory with `GEMINI_API_KEY` and `ALLOWED_ORIGINS=http://localhost:5173`)*
+*(Requires a `.env` file in the `backend/` directory with `DEEPSEEK_API_KEY` (for LLM), `GEMINI_API_KEY` (for embeddings), and `ALLOWED_ORIGINS=http://localhost:5173`)*
 
 ### 2. Frontend Application
 ```bash
@@ -93,13 +94,13 @@ CodeAsk is rigorously, statistically evaluated against a dataset of highly techn
 * **Context Precision:** Did the engine retrieve the most highly relevant structural codebase files?
 * **Faithfulness:** Is the final LLM answer strictly grounded in the retrieved code, with absolutely zero hallucinations?
 
-| Architecture | Context Precision | Faithfulness |
-| :--- | :--- | :--- |
-| **Naive RAG** (Standard Vector Search) | 0.250 | **0.989** |
-| **GraphRAG** (AST 1-Hop Expansion) | **0.263** | 0.947 |
-| **Agentic RAG** (LangGraph Iterative) | 0.189 | 0.917 |
+| Metric | Naive RAG | GraphRAG | Agentic RAG | Best Delta |
+| :--- | :---: | :---: | :---: | :---: |
+| **Context Precision** | 0.245 | **0.269** | 0.227 | +0.024 (+10%) |
+| **Faithfulness** | 0.956 | **0.963** | 0.942 | +0.007 (+1%) |
+| **Answer Correctness** | 0.397 | **0.443** | 0.408 | +0.046 (+12%) |
 
-**Conclusion:** The deterministic one-hop expansion using Abstract Syntax Tree (AST) parsing (GraphRAG) yielded the highest **Context Precision** (0.263), successfully routing the most relevant codebase files to the top of the context window. Naive RAG achieved the highest **Faithfulness** (0.989), meaning 99% of its generated claims were strictly grounded in the code. Agentic RAG underperformed on this dataset, likely due to over-retrieval polluting the context window during its recursive loops.
+**Conclusion:** In our latest evaluation run, GraphRAG swept the board, yielding the highest **Context Precision** (0.269), **Faithfulness** (0.963), and **Answer Correctness** (0.443). The deterministic one-hop AST expansion successfully pulled in critical supporting context that naive vector search alone missed, improving overall answer correctness by 12%. Agentic RAG underperformed on this dataset across all metrics, primarily due to "context bloat" — over-retrieval polluting the limited context window during its unconstrained recursive search loops.
 
 Because of this, the `/query` endpoint defaults to the deterministic GraphRAG pipeline (`mode: "graph"`). The LangGraph agent is still implemented and available via `mode: "agent"` for cases that need iterative multi-hop search, but it's opt-in rather than default — the eval, not intuition, decided which mode ships as the default.
 

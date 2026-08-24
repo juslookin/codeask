@@ -1,4 +1,4 @@
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 import os
 import time
@@ -6,30 +6,37 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-GEMINI_MODEL = "gemini-3.5-flash-lite"
-# Free tier: 500 RPD / 15 RPM / 250K TPM. Paid (Tier 1) is much higher on RPM/RPD —
-# see graphrag-qa/README.md for notes on enabling billing for eval runs.
+DEEPSEEK_MODEL = "deepseek-chat"
+# DeepSeek OpenAI-compatible endpoint.
+# See https://platform.deepseek.com/docs for rate limits and model names.
 
 # Used for final answer generation — some creative variation in phrasing is fine here.
-model = ChatGoogleGenerativeAI(
-    model=GEMINI_MODEL,
+model = ChatOpenAI(
+    model=DEEPSEEK_MODEL,
     temperature=0.3,
-    google_api_key=os.getenv("GEMINI_API_KEY")
+    openai_api_key=os.getenv("DEEPSEEK_API_KEY"),
+    openai_api_base="https://api.deepseek.com/v1",
 )
 
 # Used for structured/classification calls (agent planner + critic in llm/agent.py)
 # where we want deterministic, repeatable decisions rather than creative variation.
 # temperature=0.3 on a True/False "is context sufficient?" classifier would make the
 # agent's iteration count — and therefore the benchmark numbers — vary run to run.
-structured_model = ChatGoogleGenerativeAI(
-    model=GEMINI_MODEL,
+structured_model = ChatOpenAI(
+    model=DEEPSEEK_MODEL,
     temperature=0,
-    google_api_key=os.getenv("GEMINI_API_KEY")
+    openai_api_key=os.getenv("DEEPSEEK_API_KEY"),
+    openai_api_base="https://api.deepseek.com/v1",
 )
 
-SYSTEM_PROMPT = """You are an expert code assistant. Answer questions using ONLY the provided code chunks.
-1. End every response with a ## Citations section.
-2. Format citations strictly as: `filepath:startline-endline`
+SYSTEM_PROMPT = """You are an expert code analysis assistant. Answer questions using ONLY the provided code chunks.
+
+Rules:
+1. If the question asks about a sequence, lifecycle, or "what happens when," answer with steps in execution order.
+2. Be precise — cite specific function names, parameters, and return values from the code.
+3. If the code chunks don't contain enough information, say so explicitly.
+4. End every response with a ## Citations section.
+5. Format citations as: `filepath:startline-endline`
 """
 
 def stream_answer(question: str, context: str):

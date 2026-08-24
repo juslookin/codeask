@@ -3,10 +3,11 @@ from typing import TypedDict, Literal
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
-from llm.gemini import structured_model, safe_stream_answer
+from llm.deepseek import structured_model, safe_stream_answer
 from retrieval.vector_search import vector_search
 from retrieval.graph_traversal import expand_one_hop
 from retrieval.context_builder import build_context
+from retrieval.selector import select_top_k
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,12 @@ Provide a new, highly specific search query to execute against the codebase vect
         logger.warning(f"Planner LLM call failed, using question as fallback query: {e}")
         query = state['question']
     
+    # Dedup: if the planner repeats a previous query, don't waste an
+    # embedding + retrieval cycle — just reuse the existing history.
+    if query in history:
+        logger.info(f"[Planner] Duplicate query detected ('{query}'), skipping retrieval.")
+        return {"search_history": history, "next_action": "end"}
+
     logger.info(f"[Planner] Generated search query: {query}")
     return {"search_history": history + [query]}
 
@@ -49,7 +56,7 @@ def retriever_node(state: AgentState):
     query = state["search_history"][-1]
     logger.info(f"[Retriever] Searching for: {query}")
     
-    seed = vector_search(query, state["collection_name"])
+    seed, query_emb = vector_search(query, state["collection_name"])
     expanded = expand_one_hop(seed, state["collection_name"])
     
     current_chunks = state.get("context_chunks", [])
@@ -61,8 +68,17 @@ def retriever_node(state: AgentState):
             new_chunks.append(c)
             existing_ids.add(c["id"])
             
-    logger.info(f"[Retriever] Added {len(new_chunks)} new unique chunks to memory.")
-    return {"context_chunks": current_chunks + new_chunks}
+    # Rank and cap: merge old + new chunks, re-rank by query relevance, cap at k.
+    # Pass query_embedding and collection_name to avoid redundant embedding API calls.
+    from retrieval.vector_search import embed_query
+    original_q_emb = embed_query(state["question"])
+    merged = select_top_k(
+        state["question"], [], current_chunks + new_chunks,
+        query_embedding=original_q_emb,
+        collection_name=state["collection_name"],
+    )
+    logger.info(f"[Retriever] {len(new_chunks)} new chunks found, {len(merged)} total after selection.")
+    return {"context_chunks": merged}
 
 def critic_node(state: AgentState):
     iterations = state.get("iterations", 0) + 1
@@ -96,7 +112,11 @@ Is this context sufficient? Reply True if sufficient, False if more searching is
     return {"iterations": iterations, "next_action": action}
 
 def should_continue(state: AgentState):
-    return state["next_action"]
+    return state.get("next_action", "retrieve")
+
+def planner_should_continue(state: AgentState):
+    """Route after planner: skip retrieval if planner detected a duplicate query."""
+    return state.get("next_action", "retrieve")
 
 workflow = StateGraph(AgentState)
 workflow.add_node("planner", planner_node)
@@ -104,7 +124,7 @@ workflow.add_node("retriever", retriever_node)
 workflow.add_node("critic", critic_node)
 
 workflow.add_edge(START, "planner")
-workflow.add_edge("planner", "retriever")
+workflow.add_conditional_edges("planner", planner_should_continue, {"retrieve": "retriever", "end": END})
 workflow.add_edge("retriever", "critic")
 workflow.add_conditional_edges("critic", should_continue, {"retrieve": "planner", "end": END})
 
@@ -116,7 +136,8 @@ def run_agentic_retrieval(question: str, collection_name: str) -> str:
         "collection_name": collection_name,
         "context_chunks": [],
         "search_history": [],
-        "iterations": 0
+        "iterations": 0,
+        "next_action": "retrieve"
     }
     
     final_state = agent_app.invoke(initial_state)
@@ -135,7 +156,8 @@ def run_agent_with_chunks(question: str, collection_name: str) -> tuple[str, lis
         "collection_name": collection_name,
         "context_chunks": [],
         "search_history": [],
-        "iterations": 0
+        "iterations": 0,
+        "next_action": "retrieve"
     }
     
     final_state = agent_app.invoke(initial_state)

@@ -11,44 +11,62 @@ sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", "backend"))
 from retrieval.vector_search import vector_search
 from retrieval.graph_traversal import expand_one_hop
 from retrieval.context_builder import build_context
-from llm.gemini import safe_stream_answer
+from retrieval.selector import select_top_k
+from llm.deepseek import safe_stream_answer
 from llm.agent import run_agent_with_chunks
 from datasets import Dataset
 from ragas import evaluate
 from ragas.metrics import context_precision, answer_relevancy, answer_correctness
 from ragas.llms import LangchainLLMWrapper
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_openai import ChatOpenAI
+from google import genai
 from ragas.embeddings import LangchainEmbeddingsWrapper
 from ragas.run_config import RunConfig
 import pandas as pd
 
 # Delay between benchmark rows (build_dataset), on top of Ragas's own max_retries/
-# max_wait backoff. Tune via env var: raise it if you're still on the Gemini free
-# tier (15 RPM / 500 RPD for gemini-3.5-flash-lite); once billing is enabled
-# (Tier 1) this can safely drop toward 0. See graphrag-qa/README.md.
+# max_wait backoff. Tune via env var: raise it if you're still on the free
+# tier; once billing is enabled this can safely drop toward 0. See graphrag-qa/README.md.
 EVAL_ROW_DELAY = float(os.getenv("EVAL_RATE_LIMIT_DELAY", "4.0"))
 
 evaluator_llm = LangchainLLMWrapper(
-    ChatGoogleGenerativeAI(
-        model="gemini-3.5-flash-lite",
-        temperature=0,
-        google_api_key=os.getenv("GEMINI_API_KEY")
+    ChatOpenAI(
+        model="deepseek-chat",
+        api_key=os.getenv("DEEPSEEK_API_KEY"),
+        base_url="https://api.deepseek.com/v1",
+        temperature=0
     )
 )
 COLLECTION_NAME = "pallets_flask"
-# NOTE: "models/embedding-001" is deprecated/retired — use gemini-embedding-001.
-evaluator_embeddings = LangchainEmbeddingsWrapper(GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=os.getenv("GEMINI_API_KEY")))
+
+class GeminiEmbeddings:
+    def __init__(self, model):
+        self.model = model
+        self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        
+    def embed_documents(self, texts):
+        response = self.client.models.embed_content(model=self.model, contents=texts)
+        return [e.values for e in response.embeddings]
+        
+    def embed_query(self, text):
+        response = self.client.models.embed_content(model=self.model, contents=text)
+        return response.embeddings[0].values
+
+evaluator_embeddings = LangchainEmbeddingsWrapper(GeminiEmbeddings(model="gemini-embedding-exp-03-07"))
 
 def run_naive_rag(question: str) -> dict:
-    chunks = vector_search(question, COLLECTION_NAME)
+    chunks, _ = vector_search(question, COLLECTION_NAME)
     context = build_context(chunks, [])
     return {"answer": safe_stream_answer(question, context), "contexts": [c["source_code"] for c in chunks]}
 
 def run_graphrag(question: str) -> dict:
-    seed = vector_search(question, COLLECTION_NAME)
+    seed, query_emb = vector_search(question, COLLECTION_NAME)
     expanded = expand_one_hop(seed, COLLECTION_NAME)
-    context = build_context(seed, expanded)
-    return {"answer": safe_stream_answer(question, context), "contexts": [c["source_code"] for c in seed + expanded]}
+    chunks = select_top_k(question, seed, expanded,
+                          query_embedding=query_emb,
+                          collection_name=COLLECTION_NAME)
+    context = build_context(chunks, [])
+    return {"answer": safe_stream_answer(question, context), "contexts": [c["source_code"] for c in chunks]}
 
 def run_agentic_rag(question: str) -> dict:
     """Run the full multi-agent LangGraph retrieval pipeline.
@@ -103,6 +121,7 @@ def build_dataset(questions: list[dict], pipeline_fn, name: str) -> Dataset:
         with open(checkpoint_file, "w") as f:
             json.dump(rows, f, indent=2)
             
+        # NOTE: This delay can be reduced or removed for paid tier keys
         time.sleep(EVAL_ROW_DELAY)
         
     return Dataset.from_dict(rows)
@@ -148,3 +167,36 @@ if __name__ == "__main__":
         delta = best - n_val
         pct = (delta / max(n_val, 0.001)) * 100
         print(f"{metric:<28} {n_val:>12.3f} {g_val:>12.3f} {a_val:>12.3f} {delta:>+10.3f} ({pct:+.0f}%)")
+
+    # --- Fix 6: Eval Logging ---
+    from datetime import datetime, timezone
+    run_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    results_dir = os.path.join(SCRIPT_DIR, "results")
+    os.makedirs(results_dir, exist_ok=True)
+
+    # Save per-question scores for each pipeline
+    for name, df in [("naive", naive_df), ("graph", graph_df), ("agentic", agentic_df)]:
+        csv_path = os.path.join(results_dir, f"scores_{name}_{run_ts}.csv")
+        df.to_csv(csv_path, index=False)
+        print(f"\n  Saved {name} per-question scores: {csv_path}")
+
+    # Save run metadata
+    run_info = {
+        "run_timestamp": run_ts,
+        "question_count": len(questions),
+        "collection": COLLECTION_NAME,
+        "eval_model": "gemini-3.5-flash-lite",
+        "eval_embeddings": "gemini-embedding-001",
+        "generation_model": "gemini-3.5-flash-lite",
+        "retrieval_embedding": "all-MiniLM-L6-v2",
+        "max_context_chunks": 8,
+        "summary": {
+            "naive": {m: float(naive_df[m].mean()) for m in ["context_precision", "faithfulness", "answer_correctness"]},
+            "graph": {m: float(graph_df[m].mean()) for m in ["context_precision", "faithfulness", "answer_correctness"]},
+            "agentic": {m: float(agentic_df[m].mean()) for m in ["context_precision", "faithfulness", "answer_correctness"]},
+        }
+    }
+    run_info_path = os.path.join(results_dir, f"run_info_{run_ts}.json")
+    with open(run_info_path, "w") as f:
+        json.dump(run_info, f, indent=2)
+    print(f"  Saved run metadata: {run_info_path}")

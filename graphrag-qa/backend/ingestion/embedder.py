@@ -1,9 +1,63 @@
 import os
 import chromadb
-from sentence_transformers import SentenceTransformer
+from google import genai
+from google.genai import types
 import json
+import numpy as np
+from dotenv import load_dotenv
 
-model = SentenceTransformer("all-MiniLM-L6-v2")
+load_dotenv()
+
+GEMINI_EMBEDDING_MODEL = "gemini-embedding-exp-03-07"
+# Gemini Embedding 2 — 3072-dim, state-of-the-art code/text embeddings.
+# https://ai.google.dev/gemini-api/docs/models#text-embedding
+
+
+EMBED_BATCH_SIZE = 100  # Max texts per Gemini embed_content call
+
+
+class GeminiEmbedder:
+    """Thin wrapper around the Gemini Embedding API that exposes the same
+    `.encode(texts)` interface as SentenceTransformer so the rest of the
+    codebase (vector_search.py, embedder.py) requires zero changes."""
+
+    def __init__(self, model_name: str = GEMINI_EMBEDDING_MODEL):
+        self.model_name = model_name
+        self._client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+    def encode(
+        self,
+        texts: list[str],
+        show_progress_bar: bool = False,
+        task_type: str = "RETRIEVAL_DOCUMENT",
+    ) -> np.ndarray:
+        """Embed a list of texts and return an (N, D) float32 numpy array.
+
+        Batches texts into groups of EMBED_BATCH_SIZE to minimize API calls.
+        For example, 200 texts → 2 API calls instead of 200.
+        """
+        all_embeddings: list[list[float]] = []
+        total = len(texts)
+
+        for batch_start in range(0, total, EMBED_BATCH_SIZE):
+            batch = texts[batch_start : batch_start + EMBED_BATCH_SIZE]
+            if show_progress_bar:
+                batch_end = min(batch_start + EMBED_BATCH_SIZE, total)
+                print(f"\rEmbedding {batch_end}/{total}...", end="", flush=True)
+
+            result = self._client.models.embed_content(
+                model=self.model_name,
+                contents=batch,
+                config=types.EmbedContentConfig(task_type=task_type),
+            )
+            all_embeddings.extend(e.values for e in result.embeddings)
+
+        if show_progress_bar and total > 0:
+            print()  # newline after progress
+        return np.array(all_embeddings, dtype=np.float32)
+
+
+model = GeminiEmbedder()
 
 # Anchor path to this file's directory so it resolves correctly regardless of
 # which directory the process was launched from.  The old "./chroma_db" was
