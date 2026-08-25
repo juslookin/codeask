@@ -21,8 +21,10 @@ class GeminiEmbedder:
     `.encode(texts)` interface as SentenceTransformer so the rest of the
     codebase (vector_search.py, embedder.py) requires zero changes."""
 
-    def __init__(self, model_name: str = GEMINI_EMBEDDING_MODEL):
+    def __init__(self, model_name: str = "gemini-embedding-2", batch_size: int = 100):
+        # The new standard model (Gemini Embedding 2)
         self.model_name = model_name
+        self.batch_size = batch_size
         self._client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
     def encode(
@@ -39,18 +41,34 @@ class GeminiEmbedder:
         all_embeddings: list[list[float]] = []
         total = len(texts)
 
+        import time
         for batch_start in range(0, total, EMBED_BATCH_SIZE):
             batch = texts[batch_start : batch_start + EMBED_BATCH_SIZE]
             if show_progress_bar:
                 batch_end = min(batch_start + EMBED_BATCH_SIZE, total)
                 print(f"\rEmbedding {batch_end}/{total}...", end="", flush=True)
 
-            result = self._client.models.embed_content(
-                model=self.model_name,
-                contents=batch,
-                config=types.EmbedContentConfig(task_type=task_type),
-            )
+            # Retry loop for 429 Rate Limits (RPM or TPM)
+            for attempt in range(5):
+                try:
+                    result = self._client.models.embed_content(
+                        model=self.model_name,
+                        contents=[[t] for t in batch],
+                        config=types.EmbedContentConfig(task_type=task_type),
+                    )
+                    break
+                except Exception as e:
+                    if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                        if attempt == 4: raise e
+                        if show_progress_bar: print(f"\nTPM/RPM rate limit hit, sleeping for 60s to reset quota...")
+                        time.sleep(60) # Full minute reset for Tokens-Per-Minute
+                    else:
+                        raise e
+
             all_embeddings.extend(e.values for e in result.embeddings)
+            
+            # Base delay to pace out the chunks
+            time.sleep(2)
 
         if show_progress_bar and total > 0:
             print()  # newline after progress

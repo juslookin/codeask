@@ -45,14 +45,14 @@ class GeminiEmbeddings:
         self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
         
     def embed_documents(self, texts):
-        response = self.client.models.embed_content(model=self.model, contents=texts)
+        response = self.client.models.embed_content(model=self.model, contents=[[t] for t in texts])
         return [e.values for e in response.embeddings]
         
     def embed_query(self, text):
         response = self.client.models.embed_content(model=self.model, contents=text)
         return response.embeddings[0].values
 
-evaluator_embeddings = LangchainEmbeddingsWrapper(GeminiEmbeddings(model="gemini-embedding-exp-03-07"))
+evaluator_embeddings = LangchainEmbeddingsWrapper(GeminiEmbeddings(model="gemini-embedding-2"))
 
 def run_naive_rag(question: str) -> dict:
     chunks, _ = vector_search(question, COLLECTION_NAME)

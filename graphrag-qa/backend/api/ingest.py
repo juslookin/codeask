@@ -29,7 +29,12 @@ def blocking_ingest(github_url: str) -> dict:
 
 @router.post("/ingest")
 async def ingest(req: IngestRequest):
-    result = await asyncio.to_thread(blocking_ingest, req.github_url)
-    if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["error"])
-    return result
+    try:
+        result = await asyncio.to_thread(blocking_ingest, req.github_url)
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
+        return result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

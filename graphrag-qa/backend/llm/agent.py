@@ -19,14 +19,16 @@ class AgentState(TypedDict):
     iterations: int
     next_action: Literal["retrieve", "end"]
 
+from langchain_core.output_parsers import PydanticOutputParser
+
 class SearchQuery(BaseModel):
     query: str = Field(description="The next search query to run against the codebase")
 
 class CriticDecision(BaseModel):
     is_sufficient: bool = Field(description="True if the context is sufficient to answer the question completely")
 
-planner_model = structured_model.with_structured_output(SearchQuery)
-critic_model = structured_model.with_structured_output(CriticDecision)
+planner_parser = PydanticOutputParser(pydantic_object=SearchQuery)
+critic_parser = PydanticOutputParser(pydantic_object=CriticDecision)
 
 def planner_node(state: AgentState):
     history = state.get("search_history", [])
@@ -34,10 +36,13 @@ def planner_node(state: AgentState):
 User Question: {state['question']}
 Previous searches you tried: {history}
 
-Provide a new, highly specific search query to execute against the codebase vector database to find the missing information."""
+Provide a new, highly specific search query to execute against the codebase vector database to find the missing information.
+
+{planner_parser.get_format_instructions()}"""
     
     try:
-        res = planner_model.invoke([HumanMessage(content=prompt)])
+        res_msg = structured_model.invoke([HumanMessage(content=prompt)])
+        res = planner_parser.invoke(res_msg)
         query = res.query
     except Exception as e:
         logger.warning(f"Planner LLM call failed, using question as fallback query: {e}")
@@ -93,10 +98,13 @@ def critic_node(state: AgentState):
 Question: {state['question']}
 Context: {context_str}
 
-Is this context sufficient? Reply True if sufficient, False if more searching is needed."""
+Is this context sufficient? Reply True if sufficient, False if more searching is needed.
+
+{critic_parser.get_format_instructions()}"""
     
     try:
-        res = critic_model.invoke([HumanMessage(content=prompt)])
+        res_msg = structured_model.invoke([HumanMessage(content=prompt)])
+        res = critic_parser.invoke(res_msg)
         is_sufficient = res.is_sufficient
     except Exception as e:
         logger.warning(f"Critic LLM call failed, defaulting to end: {e}")
