@@ -36,6 +36,7 @@ def _build_graph_payload(chunks: list[dict]) -> dict:
     """
     nodes, edges = [], []
     existing_nodes = set()
+    existing_edges = set()
     qname_to_ids: dict[str, list[str]] = {}
     for c in chunks:
         qname_to_ids.setdefault(c["qualified_name"], []).append(c["id"])
@@ -49,7 +50,10 @@ def _build_graph_payload(chunks: list[dict]) -> dict:
         for callee_qname in c.get("callees", []):
             for target_id in qname_to_ids.get(callee_qname, []):
                 if target_id != node_id:
-                    edges.append({"source": node_id, "target": target_id})
+                    edge_key = (node_id, target_id)
+                    if edge_key not in existing_edges:
+                        existing_edges.add(edge_key)
+                        edges.append({"source": node_id, "target": target_id})
 
     return {"nodes": nodes, "edges": edges}
 
@@ -82,12 +86,13 @@ async def query(req: QueryRequest):
         context, graph_data = await asyncio.to_thread(
             get_context_and_graph, req.question, req.collection_name, req.mode
         )
-    except chromadb.errors.NotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail="Collection not found. Please ingest a repository first."
-        )
     except Exception as e:
+        err_msg = str(e).lower()
+        if "does not exist" in err_msg or "not found" in err_msg or "notfounderror" in err_msg:
+            raise HTTPException(
+                status_code=404,
+                detail="Collection not found. Please ingest a repository first."
+            )
         logger.exception(f"Query failed: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
     

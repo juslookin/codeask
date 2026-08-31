@@ -15,6 +15,7 @@ def expand_one_hop(seed_chunks: list[dict], collection_name: str) -> list[dict]:
     if not callee_names: return []
 
     expanded = []
+    seen_ids = set(seed_ids)
     callee_list = list(callee_names)
     
     try:
@@ -24,7 +25,8 @@ def expand_one_hop(seed_chunks: list[dict], collection_name: str) -> list[dict]:
             results = collection.get(where={"qualified_name": {"$in": batch}})
             
             for i, chunk_id in enumerate(results["ids"]):
-                if chunk_id not in seed_ids:
+                if chunk_id not in seen_ids:
+                    seen_ids.add(chunk_id)
                     meta = results["metadatas"][i]
                     expanded.append({
                         "id": chunk_id,

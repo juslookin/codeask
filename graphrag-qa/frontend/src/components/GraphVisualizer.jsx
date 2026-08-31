@@ -47,7 +47,7 @@ export default function GraphVisualizer({ retrievalGraph }) {
 
   const initialEdges = useMemo(() => {
     if (!retrievalGraph || !retrievalGraph.edges) return [];
-    return retrievalGraph.edges.map((edge, i) => ({
+    return retrievalGraph.edges.map((edge) => ({
       id: `e-${edge.source}-${edge.target}`,
       source: edge.source,
       target: edge.target,

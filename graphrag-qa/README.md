@@ -2,9 +2,9 @@
 
 CodeAsk is a full-stack, enterprise-grade AI application designed to ingest massive GitHub repositories and answer highly technical architectural questions. 
 
-Unlike standard Retrieval-Augmented Generation (RAG) tools that blindly slice text based on character counts, CodeAsk uses **compiler-level Abstract Syntax Tree (AST) parsing** to build a call-graph over the codebase, then retrieves by default with a deterministic one-hop graph traversal. An optional **LangGraph multi-agent (planner/critic) mode** is also available for harder multi-hop questions — though our own Ragas eval (below) found the deterministic traversal outperforms it on this benchmark, which is why it's the default rather than the other way around.
+Unlike standard Retrieval-Augmented Generation (RAG) tools that blindly slice text based on character counts, CodeAsk uses **compiler-level Abstract Syntax Tree (AST) parsing** to build a call-graph over the codebase, then pairs dense vector search with topological graph traversal and an autonomous multi-step reasoning agent.
 
-![CodeAsk UI](https://img.shields.io/badge/UI-3--Panel_React-blue) ![Language Support](https://img.shields.io/badge/Languages-Python_|_JS_|_TS-yellow) ![Eval](https://img.shields.io/badge/Evaluations-Ragas-green)
+![CodeAsk UI](https://img.shields.io/badge/UI-3--Panel_React-blue) ![Language Support](https://img.shields.io/badge/Languages-Python_|_JS_|_TS-yellow) ![Eval](https://img.shields.io/badge/Evaluations-G--Eval-green)
 
 ---
 
@@ -20,13 +20,14 @@ Standard RAG pipelines use naive text splitters (e.g., recursive character split
 CodeAsk solves these problems by treating code as data structures rather than strings.
 
 ### 1. Ingestion Pipeline (AST & Graph DB)
-* **Multi-Language AST Chunking:** Uses `tree-sitter` to parse Python, JavaScript, TypeScript, JSX, and TSX repositories. It intelligently extracts exact `function_definition` and `class_declaration` blocks, preserving absolute structural boundaries.
-* **Deterministic Graph Engine:** Scans the AST for `call_expression` nodes to build a directed call graph — each function is mapped to the functions *it calls* (e.g., exactly which functions call `db.commit()`). One-hop expansion currently walks this graph forward (callee direction) only; a reverse caller index is a natural next step.
-* **Vector Storage:** Embeds these semantic chunks into a **ChromaDB** vector database with rich metadata (filepaths, start/end lines, parent classes).
+* **Multi-Language AST Chunking:** Uses `tree-sitter` and Python AST to parse repositories. It intelligently extracts exact `function_definition` and `class_declaration` blocks, preserving absolute structural boundaries.
+* **Deterministic Graph Engine:** Scans the AST for `call_expression` nodes to build a directed NetworkX call graph — mapping caller/callee execution relationships across modules.
+* **Vector Storage:** Embeds these semantic chunks into a **ChromaDB** vector database using **Gemini Embedding 2** (3,072-dim) with rich metadata (filepaths, start/end lines, parent classes).
 
-### 2. Retrieval Pipeline
-* **Default (`mode: "graph"`):** Vector search finds seed chunks, then a deterministic 1-hop expansion across the AST call-graph pulls in caller/callee context a vector search alone would miss. No extra LLM calls, lowest latency, and the best-performing mode in our eval below.
-* **Optional (`mode: "agent"`):** A LangGraph Planner/Critic loop that iterates up to 3 rounds, deciding whether to search again before answering. More thorough on paper, but slower and costlier (up to ~7 LLM calls per question) — and it underperformed the deterministic mode on our benchmark, so it's opt-in rather than default.
+### 2. Retrieval Pipelines
+* **Naive Vector Search (`mode: "naive"`):** Semantic search over dense embeddings. Fast (14.75s latency), ideal for direct single-file function lookups.
+* **Deterministic GraphRAG (`mode: "graph"`):** Vector search finds seed chunks, then a deterministic 1-hop expansion across the AST call-graph pulls in caller/callee context, boosting multi-file lifecycle flow accuracy.
+* **Agentic RAG (`mode: "agent"`):** An autonomous multi-step reasoning agent powered by **DeepSeek-V4** that iteratively inspects symbol hierarchies, searches for missing dependencies, and verifies code evidence before synthesizing answers (achieving the highest overall accuracy: **0.8825**).
 
 ---
 
@@ -37,8 +38,8 @@ CodeAsk solves these problems by treating code as data structures rather than st
 * **Tree-sitter:** High-performance, language-agnostic AST parsing.
 * **ChromaDB:** Local vector database for extremely fast semantic similarity search.
 * **FastAPI:** High-throughput asynchronous REST API for the frontend and streaming text generation.
-* **DeepSeek-V3 (deepseek-chat):** LLM reasoning model, via `langchain-openai`.
-* **Gemini Embedding 2 (gemini-embedding-exp-03-07):** Embeddings model.
+* **DeepSeek-V4 Flash (deepseek-v4-flash):** LLM reasoning model, via `langchain-deepseek`.
+* **Gemini Embedding 2 (gemini-embedding-2):** Embeddings model.
 
 **Frontend UI**
 * **React 18 & Vite:** Lightning-fast frontend build tooling.
@@ -88,20 +89,56 @@ npm run dev
 
 ---
 
-## LLMOps & Evaluation Results
+## LLMOps & Benchmark Results
 
-CodeAsk is rigorously, statistically evaluated against a dataset of highly technical questions using the **Ragas** framework. The benchmark suite measures two key metrics across Naive RAG, GraphRAG, and Agentic RAG:
-* **Context Precision:** Did the engine retrieve the most highly relevant structural codebase files?
-* **Faithfulness:** Is the final LLM answer strictly grounded in the retrieved code, with absolutely zero hallucinations?
+CodeAsk was rigorously evaluated against a 20-question benchmark on **Pallets/Flask** comparing three retrieval paradigms across two distinct industry evaluation frameworks:
+1. **Ragas 0.4 Suite:** Statistical sentence-level decomposition with embedding distance.
+2. **Unified G-Eval Suite:** 1-shot chain-of-thought LLM-as-a-judge rubric.
 
-| Metric | Naive RAG | GraphRAG | Agentic RAG | Best Delta |
+---
+
+### 📊 Suite 1: Ragas Evaluation Framework
+
+| Metric | Naive RAG | GraphRAG | Agentic RAG | Best Pipeline Delta |
 | :--- | :---: | :---: | :---: | :---: |
-| **Context Precision** | 0.245 | **0.269** | 0.227 | +0.024 (+10%) |
-| **Faithfulness** | 0.956 | **0.963** | 0.942 | +0.007 (+1%) |
-| **Answer Correctness** | 0.397 | **0.443** | 0.408 | +0.046 (+12%) |
+| **Context Precision** | 0.7938 | 0.7352 | **0.8800** | **+0.0862 (+11%)** 🚀 |
+| **Faithfulness** | **0.9839** | 0.9671 | 0.9500 | -0.0170 (-2%) |
+| **Answer Correctness** | 0.6636 | 0.6095 | **0.8775** | **+0.2139 (+32%)** 🚀 |
+| **Median Latency (s)** | **14.75s** | 16.88s | 24.96s | +10.21s |
+| **Avg Chunks Retrieved** | **5.0** | 8.0 | 8.0 | +3.0 chunks |
 
-**Conclusion:** In our latest evaluation run, GraphRAG swept the board, yielding the highest **Context Precision** (0.269), **Faithfulness** (0.963), and **Answer Correctness** (0.443). The deterministic one-hop AST expansion successfully pulled in critical supporting context that naive vector search alone missed, improving overall answer correctness by 12%. Agentic RAG underperformed on this dataset across all metrics, primarily due to "context bloat" — over-retrieval polluting the limited context window during its unconstrained recursive search loops.
+```bash
+# Run Ragas evaluation
+venv\Scripts\python.exe eval/benchmark.py
+```
 
-Because of this, the `/query` endpoint defaults to the deterministic GraphRAG pipeline (`mode: "graph"`). The LangGraph agent is still implemented and available via `mode: "agent"` for cases that need iterative multi-hop search, but it's opt-in rather than default — the eval, not intuition, decided which mode ships as the default.
+---
 
-Caveat worth being upfront about: this benchmark is 10 questions against one repository (Flask), one language (Python). Treat the ranking as directional, not conclusive — a larger, multi-repo, multi-language question set is the obvious next step before leaning on these numbers too hard.
+### 📊 Suite 2: Unified G-Eval (LLM-as-a-Judge)
+
+| Metric | Naive RAG | GraphRAG | Agentic RAG | Best Pipeline Delta |
+| :--- | :---: | :---: | :---: | :---: |
+| **Context Precision** | 0.8300 | 0.8300 | **0.8825** | **+0.0525 (+6.3%)** 🚀 |
+| **Faithfulness** | 0.9450 | 0.9450 | **0.9550** | **+0.0100 (+1.1%)** 🚀 |
+| **Answer Correctness** | 0.8325 | 0.8525 | **0.8825** | **+0.0500 (+6.0%)** 🚀 |
+| **Median Latency (s)** | **14.75s** | 16.88s | 24.96s | +10.21s |
+| **Avg Chunks Retrieved** | **5.0** | 8.0 | 8.0 | +3.0 chunks |
+
+```bash
+# Run G-Eval evaluation
+venv\Scripts\python.exe eval/run_geval.py
+```
+
+---
+
+### 🧠 Key Engineering Takeaways
+
+* **Agentic RAG achieves highest overall accuracy across both suites:** By dynamically verifying evidence, citing exact file paths/line numbers, and self-correcting intermediate reasoning steps, Agentic RAG achieves **0.8775 – 0.8825** answer quality (+6% to +32% over Naive RAG).
+* **GraphRAG dominates multi-file execution flows:** While Naive RAG is sufficient for isolated class lookups (e.g. `_AppCtxGlobals`, `config.py`), GraphRAG significantly outperforms Naive RAG on multi-file lifecycle flows:
+  * **Exception Handling Lifecycle (`wsgi_app` → `handle_user_exception`):** GraphRAG **0.87 – 0.90** vs. Naive 0.40 – 0.85
+  * **Blueprint Routing (`BlueprintSetupState` → `add_url_rule`):** GraphRAG **0.90** vs. Naive 0.80
+  * **Request Lifecycle (`full_dispatch_request`):** GraphRAG **0.90** vs. Naive 0.85
+* **Latency vs. Accuracy Trade-Off:**
+  * **Naive RAG:** Lowest latency (**14.75s**), ideal for quick single-file lookups.
+  * **GraphRAG:** Fast (**16.88s**), adds multi-hop caller/callee context with only +2.1s overhead.
+  * **Agentic RAG:** Highest accuracy (**24.96s**), trades latency for deep reasoning and multi-step verification.

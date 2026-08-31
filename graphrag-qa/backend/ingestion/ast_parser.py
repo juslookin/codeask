@@ -36,8 +36,8 @@ def extract_chunks_from_file(file_path: str, repo_root: str) -> list[dict]:
 
     tree = parser.parse(bytes(source, "utf8"))
     lines = source.splitlines()
-    relative_path = os.path.relpath(file_path, repo_root)
-    module_name = os.path.splitext(relative_path)[0].replace(os.sep, ".").replace("/", ".")
+    relative_path = os.path.relpath(file_path, repo_root).replace("\\", "/")
+    module_name = os.path.splitext(relative_path)[0].replace("/", ".")
     chunks = []
 
     def get_name(node: Node) -> str:

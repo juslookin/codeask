@@ -1,32 +1,35 @@
-from langchain_openai import ChatOpenAI
+from langchain_deepseek import ChatDeepSeek
 from langchain_core.messages import HumanMessage
 import os
 import time
 from dotenv import load_dotenv
 
+# Ensure .env is loaded from backend directory regardless of process working directory
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(_BACKEND_DIR, ".env"))
 load_dotenv()
 
-DEEPSEEK_MODEL = "deepseek-chat"
-# DeepSeek OpenAI-compatible endpoint.
+DEEPSEEK_MODEL = "deepseek-v4-flash"
+# DeepSeek current model names (deepseek-chat / deepseek-reasoner were retired 2026-07-24).
+# deepseek-v4-flash — non-thinking mode, fast + cheap, use for generation and structured calls.
+# deepseek-v4-pro   — higher quality at higher cost, swap in if flash underperforms.
 # See https://platform.deepseek.com/docs for rate limits and model names.
 
 # Used for final answer generation — some creative variation in phrasing is fine here.
-model = ChatOpenAI(
+model = ChatDeepSeek(
     model=DEEPSEEK_MODEL,
     temperature=0.3,
-    openai_api_key=os.getenv("DEEPSEEK_API_KEY"),
-    openai_api_base="https://api.deepseek.com/v1",
+    api_key=os.getenv("DEEPSEEK_API_KEY"),
 )
 
 # Used for structured/classification calls (agent planner + critic in llm/agent.py)
 # where we want deterministic, repeatable decisions rather than creative variation.
 # temperature=0.3 on a True/False "is context sufficient?" classifier would make the
 # agent's iteration count — and therefore the benchmark numbers — vary run to run.
-structured_model = ChatOpenAI(
+structured_model = ChatDeepSeek(
     model=DEEPSEEK_MODEL,
     temperature=0,
-    openai_api_key=os.getenv("DEEPSEEK_API_KEY"),
-    openai_api_base="https://api.deepseek.com/v1",
+    api_key=os.getenv("DEEPSEEK_API_KEY"),
 )
 
 SYSTEM_PROMPT = """You are an expert code analysis assistant. Answer questions using ONLY the provided code chunks.

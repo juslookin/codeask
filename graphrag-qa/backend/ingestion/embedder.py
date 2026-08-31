@@ -6,9 +6,12 @@ import json
 import numpy as np
 from dotenv import load_dotenv
 
+# Ensure .env is loaded from backend directory regardless of process working directory
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(_BACKEND_DIR, ".env"))
 load_dotenv()
 
-GEMINI_EMBEDDING_MODEL = "gemini-embedding-exp-03-07"
+GEMINI_EMBEDDING_MODEL = "gemini-embedding-2"
 # Gemini Embedding 2 — 3072-dim, state-of-the-art code/text embeddings.
 # https://ai.google.dev/gemini-api/docs/models#text-embedding
 
@@ -21,7 +24,7 @@ class GeminiEmbedder:
     `.encode(texts)` interface as SentenceTransformer so the rest of the
     codebase (vector_search.py, embedder.py) requires zero changes."""
 
-    def __init__(self, model_name: str = "gemini-embedding-2", batch_size: int = 100):
+    def __init__(self, model_name: str = GEMINI_EMBEDDING_MODEL, batch_size: int = 100):
         # The new standard model (Gemini Embedding 2)
         self.model_name = model_name
         self.batch_size = batch_size

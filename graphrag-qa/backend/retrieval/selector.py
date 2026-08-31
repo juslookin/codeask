@@ -86,4 +86,4 @@ def select_top_k(
 
     # Budget: how many expansion slots remain after seeds
     budget = max(k - len(seed_chunks), 0)
-    return seed_chunks + ranked[:budget]
+    return (seed_chunks + ranked[:budget])[:k]

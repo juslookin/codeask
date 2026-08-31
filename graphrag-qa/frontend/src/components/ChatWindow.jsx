@@ -15,9 +15,9 @@ const extractText = (children) => {
 // Intercept inline code blocks that look like citations (filepath:start-end)
 // and render them as clickable tags instead of <code> elements.
 const renderers = {
-  code({ node, className, children, ...props }) {
+  code({ className, children, ...props }) {
     const text = extractText(children).trim();
-    const match = /[\w/.-]+:\d+-\d+/.exec(text);
+    const match = /[\w/\\.-]+:\d+-\d+/.exec(text);
     if (!className && match) {
       return <CitationTag citation={match[0]} />
     }
@@ -55,7 +55,16 @@ export default function ChatWindow({ collectionName, onGraphUpdate }) {
         body: JSON.stringify({ question, collection_name: collectionName, mode }),
       })
 
-      if (!res.ok) throw new Error(`Backend error ${res.status}`)
+      if (!res.ok) {
+        let errorDetail = `Backend error ${res.status}`
+        try {
+          const errData = await res.json()
+          if (errData?.detail) errorDetail = errData.detail
+        } catch {
+          // ignore json parse error
+        }
+        throw new Error(errorDetail)
+      }
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
@@ -96,11 +105,16 @@ export default function ChatWindow({ collectionName, onGraphUpdate }) {
           })
         }
       }
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", text: "Error connecting to backend." },
-      ])
+    } catch (e) {
+      setMessages((prev) => {
+        const updated = [...prev]
+        const errText = `⚠️ **Error:** ${e.message || "Error connecting to backend."}`
+        if (updated.length > 0 && updated[updated.length - 1].role === "assistant") {
+          updated[updated.length - 1] = { role: "assistant", text: errText }
+          return updated
+        }
+        return [...prev, { role: "assistant", text: errText }]
+      })
     } finally {
       setStreaming(false)
     }
