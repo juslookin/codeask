@@ -5,9 +5,11 @@ import time
 import pandas as pd
 from dotenv import load_dotenv
 
-ENV_PATH = "C:/Users/sriva/Downloads/codeask/graphrag-qa/backend/.env"
-EVAL_DIR = "C:/Users/sriva/Downloads/codeask/graphrag-qa/eval"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ENV_PATH = os.path.join(SCRIPT_DIR, "..", "backend", ".env")
+EVAL_DIR = SCRIPT_DIR
 load_dotenv(ENV_PATH)
+load_dotenv()
 
 from openai import AsyncOpenAI
 

@@ -1,7 +1,7 @@
 services:
   backend:
     build:
-      context: ./graphrag-qa/backend
+      context: ./backend
       dockerfile: Dockerfile
     container_name: codeask-backend
     restart: unless-stopped
@@ -23,7 +23,7 @@ services:
 
   frontend:
     build:
-      context: ./graphrag-qa/frontend
+      context: ./frontend
       dockerfile: Dockerfile
       args:
         - VITE_API_URL=http://localhost:8000

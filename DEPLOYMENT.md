@@ -27,7 +27,7 @@ This is the most cost-effective and scalable setup: static frontend on high-spee
 2. Log into [Render Dashboard](https://dashboard.render.com/) and click **New +** → **Blueprint** (or **Web Service**).
    - If using **Blueprint**, connect your repo and Render will automatically parse [`render.yaml`](render.yaml).
    - If creating manually as a **Web Service**:
-     - **Root Directory:** `graphrag-qa/backend`
+     - **Root Directory:** `backend`
      - **Environment:** `Python` or `Docker`
      - **Build Command:** `pip install -r requirements.txt`
      - **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
@@ -45,7 +45,7 @@ This is the most cost-effective and scalable setup: static frontend on high-spee
 2. Select your `codeask` repository.
 3. In **Project Settings**:
    - **Framework Preset:** `Vite`
-   - **Root Directory:** `graphrag-qa/frontend`
+   - **Root Directory:** `frontend`
    - **Build Command:** `npm run build`
    - **Output Directory:** `dist`
 4. In **Environment Variables**, add:
@@ -90,12 +90,12 @@ docker compose logs -f
 
 1. Install Railway CLI or visit [railway.app](https://railway.app).
 2. Create a new project from your GitHub repository.
-3. Add a service for `graphrag-qa/backend`:
-   - Set root directory to `graphrag-qa/backend`.
+3. Add a service for `backend`:
+   - Set root directory to `backend`.
    - Add environment variables `DEEPSEEK_API_KEY` and `GEMINI_API_KEY`.
    - Generate domain (e.g. `https://codeask-backend.up.railway.app`).
-4. Add a service for `graphrag-qa/frontend`:
-   - Set root directory to `graphrag-qa/frontend`.
+4. Add a service for `frontend`:
+   - Set root directory to `frontend`.
    - Set environment variable `VITE_API_URL` = `https://codeask-backend.up.railway.app`.
 
 ---
@@ -104,7 +104,7 @@ docker compose logs -f
 
 ### Backend on Fly.io
 ```bash
-cd graphrag-qa/backend
+cd backend
 fly launch --dockerfile Dockerfile --name codeask-backend
 
 # Set secrets
