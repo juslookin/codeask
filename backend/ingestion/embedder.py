@@ -93,10 +93,15 @@ model = GeminiEmbedder()
 # which directory the process was launched from.  The old "./chroma_db" was
 # CWD-relative, which meant the API server and eval/benchmark.py silently
 # opened two different databases when run from different directories.
+from chromadb.config import Settings
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _DEFAULT_CHROMA_PATH = os.path.join(_HERE, "chroma_db")
 CHROMA_PATH = os.getenv("CHROMA_DB_PATH", _DEFAULT_CHROMA_PATH)
-chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
+chroma_client = chromadb.PersistentClient(
+    path=CHROMA_PATH,
+    settings=Settings(anonymized_telemetry=False, is_persistent=True)
+)
 
 
 def embed_and_store(chunks: list[dict], graph: dict, owner_repo: str) -> str:
