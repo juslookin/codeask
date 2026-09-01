@@ -1,4 +1,4 @@
-﻿# CodeAsk Deployment Guide
+# CodeAsk Deployment Guide
 
 This guide covers all options for deploying CodeAsk into production, from one-click containerized setups with Docker to cloud hosting (Vercel, Render, Railway, Fly.io, Cloud Run).
 
