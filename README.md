@@ -19,5 +19,6 @@ retriever and a LangGraph planner/critic agent.
 - **Evaluation:** offline benchmark (`graphrag-qa/eval/`) scoring all three modes with Ragas
   metrics against a hand-written reference question set
 
-See [`graphrag-qa/README.md`](graphrag-qa/README.md) for setup, running locally, and the
-full architecture writeup — including the evaluation results and their caveats.
+See [`DEPLOYMENT.md`](DEPLOYMENT.md) for production deployment instructions (Docker, Vercel, Render, Railway, VPS).
+See [`graphrag-qa/README.md`](graphrag-qa/README.md) for local setup, architecture writeup, and evaluation results.
+

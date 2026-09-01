@@ -1,0 +1,12 @@
+﻿.env
+.env.*
+chroma_db/
+**/chroma_db/
+__pycache__/
+*.pyc
+venv/
+.venv/
+test_repo/
+eval/
+requirements-eval.txt
+*.log

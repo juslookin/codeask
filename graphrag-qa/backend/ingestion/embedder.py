@@ -28,7 +28,16 @@ class GeminiEmbedder:
         # The new standard model (Gemini Embedding 2)
         self.model_name = model_name
         self.batch_size = batch_size
-        self._client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        self._client = None
+
+    @property
+    def client(self):
+        if self._client is None:
+            api_key = os.getenv("GEMINI_API_KEY")
+            if not api_key:
+                raise ValueError("GEMINI_API_KEY environment variable is not set.")
+            self._client = genai.Client(api_key=api_key)
+        return self._client
 
     def encode(
         self,
@@ -54,7 +63,7 @@ class GeminiEmbedder:
             # Retry loop for 429 Rate Limits (RPM or TPM)
             for attempt in range(5):
                 try:
-                    result = self._client.models.embed_content(
+                    result = self.client.models.embed_content(
                         model=self.model_name,
                         contents=[[t] for t in batch],
                         config=types.EmbedContentConfig(task_type=task_type),
@@ -85,7 +94,9 @@ model = GeminiEmbedder()
 # CWD-relative, which meant the API server and eval/benchmark.py silently
 # opened two different databases when run from different directories.
 _HERE = os.path.dirname(os.path.abspath(__file__))
-chroma_client = chromadb.PersistentClient(path=os.path.join(_HERE, "chroma_db"))
+_DEFAULT_CHROMA_PATH = os.path.join(_HERE, "chroma_db")
+CHROMA_PATH = os.getenv("CHROMA_DB_PATH", _DEFAULT_CHROMA_PATH)
+chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
 
 
 def embed_and_store(chunks: list[dict], graph: dict, owner_repo: str) -> str:

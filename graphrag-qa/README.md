@@ -78,6 +78,9 @@ cd frontend
 npm run dev
 ```
 
+### 3. Production Deployment
+For complete production deployment options (Docker Compose, Vercel + Render, Railway, Fly.io), refer to [`DEPLOYMENT.md`](../DEPLOYMENT.md).
+
 ---
 
 ## Recommended Testing

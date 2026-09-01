@@ -16,10 +16,11 @@ DEEPSEEK_MODEL = "deepseek-v4-flash"
 # See https://platform.deepseek.com/docs for rate limits and model names.
 
 # Used for final answer generation — some creative variation in phrasing is fine here.
+_api_key = os.getenv("DEEPSEEK_API_KEY") or "placeholder"
 model = ChatDeepSeek(
     model=DEEPSEEK_MODEL,
     temperature=0.3,
-    api_key=os.getenv("DEEPSEEK_API_KEY"),
+    api_key=_api_key,
 )
 
 # Used for structured/classification calls (agent planner + critic in llm/agent.py)
@@ -29,7 +30,7 @@ model = ChatDeepSeek(
 structured_model = ChatDeepSeek(
     model=DEEPSEEK_MODEL,
     temperature=0,
-    api_key=os.getenv("DEEPSEEK_API_KEY"),
+    api_key=_api_key,
 )
 
 SYSTEM_PROMPT = """You are an expert code analysis assistant. Answer questions using ONLY the provided code chunks.

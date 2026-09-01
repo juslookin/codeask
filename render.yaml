@@ -1,0 +1,35 @@
+﻿services:
+  # Python FastAPI Backend Service
+  - type: web
+    name: codeask-backend
+    runtime: python
+    rootDir: graphrag-qa/backend
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+
+  # React / Vite Frontend Static Site
+  - type: web
+    name: codeask-frontend
+    runtime: static
+    rootDir: graphrag-qa/frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    autoDeploy: true
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        sync: false

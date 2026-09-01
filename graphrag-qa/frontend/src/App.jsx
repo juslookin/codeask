@@ -4,7 +4,7 @@ import ChatWindow from "./components/ChatWindow"
 import FileExplorer from "./components/FileExplorer"
 import GraphVisualizer from "./components/GraphVisualizer"
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000"
+const API = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/+$/, "")
 
 export default function App() {
   const [collectionName, setCollectionName] = useState(null)

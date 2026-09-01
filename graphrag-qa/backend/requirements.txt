@@ -9,11 +9,8 @@ tree-sitter-typescript>=0.22.0
 GitPython>=3.1.0
 google-genai>=1.0.0
 langchain-deepseek>=0.1.0
-langchain-openai>=0.3.0
 langgraph>=0.4.0
 langchain-core>=0.3.0
 pydantic>=2.0.0
 numpy>=1.26.0
-ragas>=0.2.0
-datasets>=3.0.0
-pandas>=2.0.0
+
