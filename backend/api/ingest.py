@@ -1,12 +1,6 @@
+import asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-import asyncio
-from ingestion.github import clone_repo
-from ingestion.ast_parser import parse_repo
-from ingestion.graph_builder import build_graph
-from ingestion.embedder import embed_and_store
-import shutil
-from ingestion.github import remove_readonly
 
 router = APIRouter()
 
@@ -14,6 +8,12 @@ class IngestRequest(BaseModel):
     github_url: str
 
 def blocking_ingest(github_url: str) -> dict:
+    import shutil
+    from ingestion.github import clone_repo, remove_readonly
+    from ingestion.ast_parser import parse_repo
+    from ingestion.graph_builder import build_graph
+    from ingestion.embedder import embed_and_store
+
     res = clone_repo(github_url)
     if res["error"]:
         # Return error as plain dict — HTTPException cannot cross thread boundaries

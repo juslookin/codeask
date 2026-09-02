@@ -1,16 +1,9 @@
 import logging
 import json
+import asyncio
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import asyncio
-import chromadb
-from llm.deepseek import stream_answer
-from llm.agent import agent_app
-from retrieval.vector_search import vector_search
-from retrieval.graph_traversal import expand_one_hop
-from retrieval.context_builder import build_context
-from retrieval.selector import select_top_k
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +51,9 @@ def _build_graph_payload(chunks: list[dict]) -> dict:
     return {"nodes": nodes, "edges": edges}
 
 def get_context_and_graph(question: str, collection: str, mode: str = "graph"):
+    from retrieval.context_builder import build_context
     if mode == "agent":
+        from llm.agent import agent_app
         initial_state = {
             "question": question,
             "collection_name": collection,
@@ -70,6 +65,9 @@ def get_context_and_graph(question: str, collection: str, mode: str = "graph"):
         final_state = agent_app.invoke(initial_state)
         chunks = final_state.get("context_chunks", [])
     else:
+        from retrieval.vector_search import vector_search
+        from retrieval.graph_traversal import expand_one_hop
+        from retrieval.selector import select_top_k
         seed, query_emb = vector_search(question, collection)
         expanded = expand_one_hop(seed, collection)
         chunks = select_top_k(question, seed, expanded,
@@ -97,6 +95,7 @@ async def query(req: QueryRequest):
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
     
     def event_stream():
+        from llm.deepseek import stream_answer
         # First yield the graph data
         yield f"__GRAPH_START__\n{json.dumps(graph_data)}\n__GRAPH_END__\n"
         # Then stream the answer — wrapped in try/except so a mid-stream
