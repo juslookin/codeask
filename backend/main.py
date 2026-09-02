@@ -27,6 +27,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+def on_startup():
+    print(f"=== CodeAsk API server is READY on port {os.getenv('PORT', 8000)} ===")
+
 @app.get("/")
 def root():
     return {"status": "ok", "service": "CodeAsk API", "version": "1.0.0"}
